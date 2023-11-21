@@ -1,0 +1,1023 @@
+---
+title: "Hybrid_Teaching_Regression"
+output:
+  html_document:
+    df_print: paged
+---
+#Importing required libraries
+```{r}
+library(readxl)
+library(raincloudplots)
+library(ggrain)
+library(table1)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(gridExtra)
+library(corrplot)
+library(stats)
+library(rpart)
+library(rpart.plot)
+library(caret)
+library(e1071)
+library(writexl)
+```
+
+
+#importing the data
+```{r}
+data <- read_excel("C:\\Users\\Angat\\OneDrive\\Desktop\\STM5IPL_HYBRID_LEARNING\\Deidentified Data Detailed Complie-03-02-2023 (no qual).xlsx", sheet = "Matched Data Compile 12.11.22")
+data<-data[-89,]
+data <- subset(data, select = -c(...2,...66))
+data
+```
+
+#selecting relevant columns for analysis
+```{r}
+selected_columns <-subset(data, select =c("Mode", "Region origin", "Campus", "ATAR", "Course Weighted Average","Age", "Gender", "IMI Total","IMI - Interest/Enjoyment","IMI - Perceived Competence","IMI - Effort/Importance","IMI - Pressure/Tension","IMI - Perceived Choice","IMI - Value/Usefulness","IMI - Relatedness","SUS", "AT2 article summary Wk 5?","AT 3: Critical appraisal essay Wk9", "IM_Percentage", "EM_Percentage","Motivation_Type", "Like_Hybrid","TOTAL","AT3_Performance","AT3_Median_Performance","TOTAL_Performance"))
+
+# Display the names of the selected columns
+names(selected_columns)
+
+```
+
+#Data Cleaning
+```{r}
+#Check the ATAR with 0 values
+data[data$ATAR==0,]
+```
+
+
+```{r}
+# Replace 0 values in ATAR column with "NA"
+selected_columns$ATAR <- ifelse(selected_columns$ATAR == 0,NA, selected_columns$ATAR)
+
+# Replace "-" with NA in specific columns using mutate_at
+selected_columns <- selected_columns %>%
+  mutate_at(
+    vars( `AT2 article summary Wk 5?`, `AT 3: Critical appraisal essay Wk9`),
+    ~ifelse(. %in% c("-", " ","0"), NA, .)
+  )
+
+
+
+```
+
+
+
+
+
+#Data Exploration
+```{r}
+my.render.cont <- function(x) {
+    with(stats.apply.rounding(stats.default(x), digits=2), c("",
+        "Mean (SD)"=sprintf("%s (&plusmn; %s)", MEAN, SD)))
+  
+}
+
+# Generate Table 1
+table1(
+  ~ Age + ATAR + `Course Weighted Average` +`IMI Total`+`SUS` + `AT2 article summary Wk 5?` + `AT 3: Critical appraisal essay Wk9` +`IM_Percentage` + `EM_Percentage`+`Like_Hybrid` | Mode,
+  data=selected_columns,
+  render.continuous = my.render.cont,
+  caption="Table 1 : Descriptive statistics exploration for all variables wrt Study Mode"
+)
+
+
+```
+
+```{r}
+#Stat summary for Mode
+
+table1(~Age + ATAR + `Course Weighted Average`+`SUS`+`AT2 article summary Wk 5?`+`AT 3: Critical appraisal essay Wk9`+`IM_Percentage`+`EM_Percentage`|Mode,data=selected_columns,caption="Table 1 : Descriptive statistics for Mode",render.continuous = my.render.cont)
+```
+
+
+```{r}
+#Stat summary for Mode and Motivation Type
+
+table1(~Age + ATAR + `Course Weighted Average`+`SUS`+`AT2 article summary Wk 5?`+`AT 3: Critical appraisal essay Wk9`+`IM_Percentage`+`EM_Percentage`|Mode*Motivation_Type,data=selected_columns,caption="Table 2 : Descriptive statistics for Mode and Motivation type",render.continuous = my.render.cont)
+```
+
+
+
+```{r}
+#Stat summary for Mode and Gender
+
+table1(~Age + ATAR + `Course Weighted Average`+`SUS`+`AT2 article summary Wk 5?`+`AT 3: Critical appraisal essay Wk9`+`IM_Percentage`+`EM_Percentage`|Mode*Gender,data=selected_columns,caption="Table 3 : Descriptive statistics for Mode and Gender",render.continuous = my.render.cont)
+```
+
+
+```{r}
+#Stat summary for Motivation type and Gender
+
+table1(~Age + ATAR + `Course Weighted Average`+`SUS`+`AT2 article summary Wk 5?`+`AT 3: Critical appraisal essay Wk9`+`IM_Percentage`+`EM_Percentage`|Motivation_Type*Gender,data=selected_columns,caption="Table 4 : Descriptive statistics for Motivation Type and Gender")
+```
+
+
+#Checking for missing values after imputation of null values
+```{r}
+relevant_cols <- c("Mode", "Region origin", "Campus", "ATAR", "Course Weighted Average","Age", "Gender", "IMI - Interest/Enjoyment","IMI - Perceived Competence","IMI Total","IMI - Effort/Importance","IMI - Pressure/Tension","IMI - Perceived Choice","IMI - Value/Usefulness","IMI - Relatedness","SUS", "AT2 article summary Wk 5?","AT 3: Critical appraisal essay Wk9", "IM_Percentage", "EM_Percentage","Motivation_Type", "Like_Hybrid","TOTAL","AT3_Performance","AT3_Median_Performance","TOTAL_Performance")
+complete_data <- selected_columns[complete.cases(selected_columns[, relevant_cols]), ]
+colSums(is.na(complete_data))
+```
+
+```{r}
+# Create a count plot for Motivation_Type
+ggplot(complete_data, aes(y = Motivation_Type)) +
+  geom_bar(fill = "#3676e8", color = "black") +
+  labs(y = "Motivation Type", x = "Count") +
+  ggtitle("Count of Motivation Types")
+
+```
+
+
+```{r}
+# Create a count plot for Motivation_Type
+ggplot(complete_data, aes(y = Like_Hybrid)) +
+  geom_bar(fill = "#ff6767", color = "black") +
+  labs(y = "Like Hybrid", x = "Count") +
+  ggtitle("Count of Students Liking Hybrid")
+```
+
+
+```{r}
+like_hybrid_yes<-dplyr::filter(complete_data,Like_Hybrid=="YES")
+like_hybrid_yes<-dplyr::select(like_hybrid_yes,Motivation_Type)
+like_hybrid_yes<-dplyr::count(like_hybrid_yes,Motivation_Type)
+intrinsic_count <- like_hybrid_yes$n[like_hybrid_yes$Motivation_Type == "INTRINSIC"]
+extrinsic_count <- like_hybrid_yes$n[like_hybrid_yes$Motivation_Type == "EXTRINSIC"]
+ratio <- intrinsic_count / extrinsic_count
+print(ratio)
+
+# Create the first plot
+plot1 <- ggplot(complete_data, aes(y = Motivation_Type,fill=Motivation_Type)) +
+  geom_bar(position = "dodge", color = "black") +
+  labs(y = "Motivation Type", x = "Count") +scale_fill_manual(values = c("INTRINSIC" = "#a8dbad", "EXTRINSIC" = "#3498db"))+
+  ggtitle("Count of Motivation Types")
+
+# Create the second plot
+plot2 <- ggplot(complete_data, aes(y = Motivation_Type, fill = Like_Hybrid)) +
+  geom_bar(position = "dodge", color = "black") +
+  labs(y = "Motivation Type", x = "Count") +
+  ggtitle("Ratio of Intrinsic to Extrinsic motivated students") +
+  scale_fill_manual(values = c("YES" = "#3498db", "NO" = "#e30022"))
+
+# Arrange the plots in a single frame
+grid.arrange(plot1, plot2, nrow = 2)
+
+```
+
+```{r}
+plot.1<-ggplot(complete_data, aes(y = Mode, x = `AT 3: Critical appraisal essay Wk9`, fill = Mode)) +
+  geom_boxplot() +
+  labs(y = "Mode", x = "AT 3: Critical appraisal essay Wk9") +
+  ggtitle("AT3 Grade distribution for different Modes") +
+  theme_minimal() +
+  scale_fill_manual(values = c("Hybrid/Class.com" = "#3498db", "Online/Zoom" = "#a8dbad"))  # Assuming these are the
+
+
+plot.2<-ggplot(complete_data, aes(y = Motivation_Type, x = `AT 3: Critical appraisal essay Wk9`, fill = Motivation_Type)) +
+  geom_boxplot() +
+  labs(y = "Motivation Type", x = "AT 3: Critical appraisal essay Wk9") +
+  ggtitle("AT3 Grade distribution for different Motivation Types") +
+  theme_minimal() +
+  scale_fill_manual(values = c("INTRINSIC" = "#a8dbad", "EXTRINSIC" = "#3498db"))  # Assign colors as per your
+
+# Arrange the plots in a single frame
+plt.3<-grid.arrange(plot.1, plot.2, nrow = 2)
+```
+
+```{r}
+# Assuming 'Mode' is a factor variable
+plt.4<-ggplot(complete_data, aes(x = Gender, y = `AT 3: Critical appraisal essay Wk9`, fill = Gender)) +
+  geom_boxplot() +
+  labs(x = "Gender", y = "AT 3: Critical appraisal essay Wk9") +
+  ggtitle("Distribution of 'AT 3: Critical appraisal essay Wk9' by Gender") +
+  theme_minimal()+ggtitle("AT3 distribution for different Gender")+
+  scale_fill_manual(values = c("Female" = "pink", "Male" = "#add8e6"))
+
+grid.arrange(plt.3,plt.4,ncol=2)
+```
+
+
+```{r}
+# Box plot for Gender
+p1 <- ggplot(complete_data, aes(x = Gender, y = `AT 3: Critical appraisal essay Wk9`, fill = Gender)) +
+  geom_boxplot() +
+  labs(y = "Gender", x = "AT 3: Critical appraisal essay Wk9") +
+  ggtitle("Distribution of AT 3 by Gender") +
+  scale_fill_manual(values = c("Female" = "pink", "Male" = "#add8e6"))+
+  theme_minimal()
+
+# Box plot for Like_Hybrid
+p2 <- ggplot(complete_data, aes(x = as.factor(Like_Hybrid), y = `AT 3: Critical appraisal essay Wk9`, fill = Like_Hybrid)) +
+  geom_boxplot() +
+  labs(y = "Like_Hybrid", x = "AT 3: Critical appraisal essay Wk9") +
+  ggtitle("Distribution of 'AT 3 by Like_Hybrid") +
+  scale_fill_manual(values = c("NO" = "#e30022", "YES" = "#a8dbad"))+
+  theme_minimal()
+
+# Arrange the two plots in a 2x1 grid
+plot.3<-grid.arrange(p1, p2, ncol = 2)
+grid.arrange(plt.3,plot.3,nrow=2)
+
+```
+
+```{r}
+# List of numerical variable names with double quotes
+numerical_vars <- c("ATAR", "Course Weighted Average", "Age", "IMI - Interest/Enjoyment","IMI - Perceived Competence","IMI - Effort/Importance","IMI - Pressure/Tension","IMI - Perceived Choice","IMI - Value/Usefulness","IMI - Relatedness","SUS", "AT2 article summary Wk 5?", "AT 3: Critical appraisal essay Wk9","TOTAL","IM_Percentage", "EM_Percentage")
+
+# Reshape the data into a long format
+data_long <- complete_data %>%
+  pivot_longer(cols = all_of(numerical_vars))
+
+# Create a grid of histograms
+hist_grid <- ggplot(data_long, aes(x = value)) +
+  geom_boxplot(fill = "#a8dbad", color = "black") +
+  facet_wrap(~ name, scales = "free") +
+  labs(x = "Value", y = "Frequency") +
+  theme_minimal()+ggtitle("Outlier Analysis for Variables")
+
+# Print the histogram grid
+print(hist_grid)
+```
+
+
+#For Hybrid
+```{r}
+# Load the required packages
+library(ggplot2)
+library(tidyr)
+
+# Assuming your data is loaded into a dataframe called 'data'
+# Replace 'data' with your actual dataframe name
+
+# List of numerical variable names with double quotes
+numerical_vars <- c("ATAR", "Course Weighted Average", "Age", "IMI - Interest/Enjoyment","IMI - Perceived Competence","IMI - Effort/Importance","IMI - Pressure/Tension","IMI - Perceived Choice","IMI - Value/Usefulness","IMI - Relatedness","SUS", "AT2 article summary Wk 5?", "AT 3: Critical appraisal essay Wk9","TOTAL","IM_Percentage", "EM_Percentage")
+
+# Reshape the data into a long format
+data_long <- complete_data %>%filter(Mode=="Hybrid/Class.com")%>%pivot_longer(cols = all_of(numerical_vars))
+
+# Create a grid of histograms
+hist_grid <- ggplot(data_long, aes(x = value)) +
+  geom_boxplot(fill = "#4169e1", color = "black") +
+  facet_wrap(~ name, scales = "free") +
+  labs(x = "Value", y = "Frequency") +
+  theme_minimal()+ggtitle("Outlier Analysis for Variables For Hybrid Mode")
+
+# Print the histogram grid
+print(hist_grid)
+```
+
+#Outlier analysis for Online Mode
+```{r}
+# Load the required packages
+library(ggplot2)
+library(tidyr)
+
+# Assuming your data is loaded into a dataframe called 'data'
+# Replace 'data' with your actual dataframe name
+
+# List of numerical variable names with double quotes
+numerical_vars <- c("ATAR", "Course Weighted Average", "Age", "IMI - Interest/Enjoyment","IMI - Perceived Competence","IMI - Effort/Importance","IMI - Pressure/Tension","IMI - Perceived Choice","IMI - Value/Usefulness","IMI - Relatedness","SUS", "AT2 article summary Wk 5?", "AT 3: Critical appraisal essay Wk9","TOTAL","IM_Percentage", "EM_Percentage")
+
+# Reshape the data into a long format
+data_long <- complete_data %>%filter(Mode=="Online/Zoom")%>%pivot_longer(cols = all_of(numerical_vars))
+
+# Create a grid of histograms
+hist_grid <- ggplot(data_long, aes(x = value)) +
+  geom_boxplot(fill = "#e8f48c", color = "black") +
+  facet_wrap(~ name, scales = "free") +
+  labs(x = "Value", y = "Frequency") +
+  theme_minimal()+ggtitle("Outlier Analysis for Variables For Online Mode")
+
+# Print the histogram grid
+print(hist_grid)
+```
+
+#Outlier analysis for INTRINSIC motivation type
+```{r}
+# Load the required packages
+library(ggplot2)
+library(tidyr)
+
+# Assuming your data is loaded into a dataframe called 'data'
+# Replace 'data' with your actual dataframe name
+
+# List of numerical variable names with double quotes
+numerical_vars <- c("ATAR", "Course Weighted Average", "Age", "IMI - Interest/Enjoyment","IMI - Perceived Competence","IMI - Effort/Importance","IMI - Pressure/Tension","IMI - Perceived Choice","IMI - Value/Usefulness","IMI - Relatedness","SUS", "AT2 article summary Wk 5?", "AT 3: Critical appraisal essay Wk9","TOTAL","IM_Percentage", "EM_Percentage")
+
+# Reshape the data into a long format
+data_long <- complete_data %>%filter(Motivation_Type=="INTRINSIC")%>%pivot_longer(cols = all_of(numerical_vars))
+
+# Create a grid of histograms
+hist_grid <- ggplot(data_long, aes(x = value)) +
+  geom_boxplot(fill = "#6f2da8", color = "black") +
+  facet_wrap(~ name, scales = "free") +
+  labs(x = "Value", y = "Frequency") +
+  theme_minimal()+ggtitle("Outlier Analysis for Variables Intrinsic Motivation")
+
+# Print the histogram grid
+print(hist_grid)
+```
+
+```{r}
+library(psych)
+describe(complete_data[,c("ATAR", "Course Weighted Average","Age","IMI Total","AT2 article summary Wk 5?","AT 3: Critical appraisal essay Wk9","IM_Percentage", "EM_Percentage","TOTAL")])
+```
+
+```{r}
+#storing the cleaned dataset
+write_xlsx(complete_data, path = "C:\\Users\\Angat\\Downloads\\hybrid_teaching_cleaned.xlsx")
+```
+
+
+
+#Statistical testing
+```{r}
+#Statistical test to check pvalues for different groups for AT3
+atar_hybrid <- complete_data$Age[complete_data$Mode == "Hybrid/Class.com"]
+atar_online <- complete_data$Age[complete_data$Mode == "Online/Zoom"]
+
+# Perform Mann-Whitney U test
+result <- wilcox.test(atar_hybrid, atar_online)
+
+# Print the result
+print(result$p.value)
+
+#Like Mode we can use different col names and their values to test against AT3
+```
+
+```{r}
+perform_stat_test <- function(data, variable, grouping_variable) {
+  # Shapiro-Wilk Test for Normality
+  shapiro_test_result <- shapiro.test(data[[variable]])
+  
+  if (shapiro_test_result$p.value < 0.05) {
+    cat("For ",grouping_variable,"\n")
+    cat("The variable", variable, "is not normally distributed.\n p-value:", shapiro_test_result$p.value)
+    
+    # Mann-Whitney U Test
+    mwu_test_result <- wilcox.test(data[[variable]] ~ data[[grouping_variable]])
+    
+    # Print the Mann-Whitney U test results
+    print(mwu_test_result)
+    
+    # Provide insights based on p-value
+    if (mwu_test_result$p.value < 0.05) {
+      cat("Based on the Mann-Whitney U test, there is a statistically significant difference in", variable, "between groups for .\n")
+    } else {
+      cat("Based on the Mann-Whitney U test, there is no statistically significant difference in", variable, "between groups.\n")
+    }
+  } else {
+    cat("The variable", variable, "is normally distributed.\n p-value:", shapiro_test_result$p.value)
+    
+    # Independent Samples t-test
+    t_test_result <- t.test(data[[variable]] ~ data[[grouping_variable]])
+    
+    # Print the t-test results
+    print(t_test_result)
+    
+    # Provide insights based on p-value
+    if (t_test_result$p.value < 0.05) {
+      cat("Based on the Independent Samples t-test, there is a statistically significant difference in", variable, "between groups.\n")
+    } else {
+      cat("Based on the Independent Samples t-test, there is no statistically significant difference in", variable, "between groups.\n")
+    }
+  }
+}
+
+#Stat test between Mode and AT3
+perform_stat_test(complete_data, "AT 3: Critical appraisal essay Wk9", "Mode")
+
+perform_stat_test(complete_data, "AT 3: Critical appraisal essay Wk9", "Motivation_Type")
+
+perform_stat_test(complete_data, "AT 3: Critical appraisal essay Wk9","Like_Hybrid")
+
+perform_stat_test(complete_data, "AT 3: Critical appraisal essay Wk9","Gender")
+
+# Filter the data for Intrinsic motivation type
+intrinsic_data <- complete_data %>%
+  filter(Motivation_Type == "INTRINSIC")
+
+# Perform your statistical test on the filtered data
+perform_stat_test(intrinsic_data, "AT 3: Critical appraisal essay Wk9", "Mode")
+
+# Filter the data for Extrinsic motivation type
+extrinsic_data <- complete_data %>%
+  filter(Motivation_Type == "EXTRINSIC")
+
+# Perform your statistical test on the filtered data
+perform_stat_test(extrinsic_data, "AT 3: Critical appraisal essay Wk9", "Mode")
+
+# Filter the data for Like Hybrid
+love_hybrid <- complete_data %>%
+  filter(Like_Hybrid == "YES")
+
+# Perform your statistical test on the filtered data
+perform_stat_test(love_hybrid, "AT 3: Critical appraisal essay Wk9", "Mode")
+
+
+
+# Filter the data for dont Like Hybrid
+dont_love_hybrid <- complete_data %>%
+  filter(Like_Hybrid == "NO")
+
+# Perform your statistical test on the filtered data
+perform_stat_test(dont_love_hybrid, "AT 3: Critical appraisal essay Wk9", "Mode")
+
+
+# Filter the data for dont Like Hybrid
+hybrid_learning <- complete_data %>%
+  filter(Mode == "Hybrid/Class.com")
+#Stat test between Gender and AT3
+perform_stat_test(hybrid_learning, "AT 3: Critical appraisal essay Wk9", "Gender")
+```
+
+
+```{r}
+table <- table(complete_data$Mode,complete_data$Motivation_Type)
+
+# Chi-square test
+test_result <- fisher.test(table)
+
+# Print the result
+print(test_result)
+```
+
+```{r}
+table <- table(complete_data$Mode,complete_data$Like_Hybrid)
+
+# Chi-square test
+test_result <- fisher.test(table)
+
+# Print the result
+print(test_result)
+```
+
+```{r}
+table <- table(complete_data$Like_Hybrid,complete_data$Motivation_Type)
+
+# Chi-square test
+test_result <- fisher.test(table)
+
+# Print the result
+print(test_result)
+```
+
+```{r}
+table <- table(complete_data$Gender,complete_data$Motivation_Type)
+
+# Chi-square test
+test_result <- fisher.test(table)
+
+# Print the result
+print(test_result)
+```
+
+```{r}
+write.csv(complete_data, file ="C:\\Users\\Angat\\OneDrive\\Desktop\\STM5IPL_HYBRID_LEARNING\\hybrid_dataset.csv", row.names = FALSE)
+```
+
+
+
+#Transforming nominal categorical variables
+```{r}
+complete_data$Gender <- factor(complete_data$Gender, labels = c(0, 1))
+complete_data$Campus_transformed <- as.numeric(factor(ifelse(complete_data$Campus == "Bundoora", 0, 1) ) )
+complete_data$Age_Group <- ifelse(complete_data$Age <= 19,1,0)
+```
+
+
+#Transforming binary categorical variables
+```{r}
+regression_data<-complete_data
+regression_data$Mode<- as.numeric(factor(regression_data$Mode, labels = c(0, 1)))
+regression_data$Gender <- as.numeric(factor(regression_data$Gender, labels = c(0, 1)))
+regression_data$Motivation_Type<- as.numeric(factor(regression_data$Motivation_Type, labels = c(0, 1)))
+regression_data$Like_Hybrid<- as.numeric(factor(regression_data$Like_Hybrid, labels = c(0, 1)))
+
+```
+
+
+```{r}
+# List of numerical variable names with double quotes
+numerical_vars <- c("ATAR", "Course Weighted Average", "Age", "IMI - Interest/Enjoyment","IMI - Perceived Competence","IMI - Effort/Importance","IMI - Pressure/Tension","IMI - Perceived Choice","IMI - Value/Usefulness","IMI - Relatedness", "AT2 article summary Wk 5?", "AT 3: Critical appraisal essay Wk9","TOTAL","IM_Percentage", "EM_Percentage")
+
+# Reshape the data into a long format
+data_long <- regression_data %>%
+  pivot_longer(cols = all_of(numerical_vars))
+
+# Create a grid of histograms
+hist_grid <- ggplot(data_long, aes(x = value)) +
+  geom_histogram(bins = 20, fill = "#3498db", color = "black") +
+  facet_wrap(~ name, scales = "free") +
+  labs(x = "Value", y = "Frequency") +
+  ggtitle("Distribution of Variables")+
+  theme_minimal()
+
+# Print the histogram grid
+print(hist_grid)
+```
+
+
+```{r}
+# Assuming your data is loaded into a dataframe called 'regression_data'
+# Replace 'regression_data' with your actual dataframe name
+
+# Add a unique identifier to the original data
+regression_data <- regression_data %>% mutate(id = row_number())
+
+numerical_vars <- c("ATAR", "Course Weighted Average", "Age", "IMI - Interest/Enjoyment","IMI - Perceived Competence","IMI - Effort/Importance","IMI - Pressure/Tension","IMI - Perceived Choice","IMI - Value/Usefulness","IMI - Relatedness", "AT2 article summary Wk 5?","IM_Percentage", "EM_Percentage")
+
+# Reshape the data into a long format and add a unique identifier
+data_long <- regression_data %>%
+  pivot_longer(cols = all_of(numerical_vars), names_to = "Variable", values_to = "Value") %>%
+  mutate(id = rep(regression_data$id, length(numerical_vars)))
+
+# Join with the original data to bring in the "AT 3: Critical appraisal essay Wk9" values
+data_long <- left_join(data_long, dplyr::select(regression_data, id, `AT 3: Critical appraisal essay Wk9`), by = "id")
+
+target<-data_long$`AT 3: Critical appraisal essay Wk9.x`
+
+# Create a grid of scatter plots with linear lines
+scatter_grid <- ggplot(data_long, aes(x = target, y = Value)) +
+  geom_point(aes(color = Variable), alpha = 0.6) +
+  geom_smooth(method = "lm", se = FALSE, aes(color = Variable)) +
+  facet_wrap(~ Variable, scales = "free") +
+  labs(x = "AT 3: Critical appraisal essay Wk9", y = "Value") +
+  ggtitle("Correlation Between Independent and AT3 variable",subtitle = "Assesing linear relationship to confirm Regression assumption")
+  theme_minimal()
+
+# Print the scatter plot grid
+print(scatter_grid)
+```
+
+
+
+```{r}
+# List of numerical variable names with double quotes
+numerical_vars <- c("ATAR", "Course Weighted Average", "Age", "IMI - Interest/Enjoyment","IMI - Perceived Competence","IMI - Effort/Importance","IMI - Pressure/Tension","IMI - Perceived Choice","IMI - Value/Usefulness","IMI - Relatedness","SUS", "AT2 article summary Wk 5?","TOTAL","IM_Percentage", "EM_Percentage")
+
+
+regression_data$`AT 3: Critical appraisal essay Wk9` <- log(regression_data$`AT 3: Critical appraisal essay Wk9`)
+```
+
+
+```{r}
+# Load the required packages
+# Assuming your data is loaded into a dataframe called 'regression_data'
+# Replace 'regression_data' with your actual dataframe name
+
+# Add a unique identifier to the original data
+regression_data <- regression_data %>% mutate(id = row_number())
+
+numerical_vars <- c("ATAR", "Course Weighted Average", "Age", "IMI - Interest/Enjoyment","IMI - Perceived Competence","IMI - Effort/Importance","IMI - Pressure/Tension","IMI - Perceived Choice","IMI - Value/Usefulness","IMI - Relatedness", "AT2 article summary Wk 5?","IM_Percentage", "EM_Percentage")
+
+# Reshape the data into a long format and add a unique identifier
+data_long <- regression_data %>%
+  pivot_longer(cols = all_of(numerical_vars), names_to = "Variable", values_to = "Value") %>%
+  mutate(id = rep(regression_data$id, length(numerical_vars)))
+
+# Join with the original data to bring in the "AT 3: Critical appraisal essay Wk9" values
+data_long <- left_join(data_long, dplyr::select(regression_data, id, `AT 3: Critical appraisal essay Wk9`), by = "id")
+
+target<-data_long$`AT 3: Critical appraisal essay Wk9.x`
+
+# Create a grid of scatter plots with linear lines
+scatter_grid <- ggplot(data_long, aes(x = target, y = Value)) +
+  geom_point(aes(color = Variable), alpha = 0.6) +
+  geom_smooth(method = "lm", se = FALSE, aes(color = Variable)) +
+  facet_wrap(~ Variable, scales = "free") +
+  labs(x = "AT 3: Critical appraisal essay Wk9", y = "Value") +
+  ggtitle("Correlation Between Independent and AT3 variable",subtitle = "Assesing linear relationship to confirm Regression assumption After log transformation")
+  theme_minimal()
+
+# Print the scatter plot grid
+print(scatter_grid)
+
+
+```
+
+
+```{r}
+#Removing unwanted variables for linear regression modelling to avoid multicollinearity
+lin_regression_data<-dplyr::select(regression_data,-c(Campus,`Region origin`,AT3_Performance,AT3_Median_Performance,TOTAL,TOTAL_Performance,SUS,`IMI - Interest/Enjoyment`,`IMI - Perceived Competence`,`IMI - Effort/Importance`,`IMI - Perceived Choice`,`IMI - Value/Usefulness`,`IMI - Relatedness`,`IMI Total`,EM_Percentage,Like_Hybrid,id,`Course Weighted Average`))
+
+numerical_vars <- c("ATAR", "Course Weighted Average", "Age_Group", "IMI - Interest/Enjoyment","IMI - Perceived Competence","IMI - Effort/Importance","IMI - Pressure/Tension","IMI - Perceived Choice","IMI - Value/Usefulness","IMI - Relatedness", "AT2 article summary Wk 5?","IM_Percentage","EM_Percentage","TOTAL","Gender","Motivation_Type","Campus_transformed","AT 3: Critical appraisal essay Wk9")
+
+# Calculate the correlation matrix
+correlation_matrix <- cor(regression_data[,numerical_vars])
+
+
+# Create a correlation matrix plot using corrplot with labels
+corrplot(correlation_matrix, method = "color", type = "upper", tl.col = "black", tl.srt = 45,
+         tl.cex = 0.7, addCoef.col = "black", number.cex = 0.5)
+```
+
+#Correlation plot after removing independent variables that were highly correlated among themsleves
+```{r}
+numerical_vars <- c("Mode","ATAR",
+    "Age_Group","Gender","AT2 article summary Wk 5?","IMI - Pressure/Tension","IM_Percentage",
+    "Motivation_Type","Campus_transformed","AT 3: Critical appraisal essay Wk9")
+
+# Calculate the correlation matrix
+correlation_matrix <- cor(regression_data[,numerical_vars])
+
+# Create a correlation matrix plot using corrplot with labels
+corrplot(correlation_matrix, method = "color", type = "upper", tl.col = "black", tl.srt = 45,
+         tl.cex = 0.7, addCoef.col = "black", number.cex = 0.5)
+
+```
+
+
+```{r}
+# Function to calculate RMSE for a linear regression model
+calculate_RMSE <- function(model, data, target_column) {
+  # Step 1: Predict values using the model
+  predicted_values <- predict(model, newdata = data)
+  
+  # Step 2: Calculate the residuals
+  residuals <- data[[target_column]] - predicted_values
+  
+  # Step 3: Square the residuals
+  squared_residuals <- residuals^2
+  
+  # Step 4: Take the mean of squared residuals
+  mean_squared_residuals <- mean(squared_residuals)
+  
+  # Step 5: Take the square root
+  RMSE <- sqrt(mean_squared_residuals)
+  
+  # Print RMSE
+  print(paste("Root Mean Square Error (RMSE): ", RMSE))
+}
+
+#function to get regression details
+get_regression_summary <- function(model) {
+  # Extract coefficients, standard errors, and p-values
+  coefficients <- coef(summary(model))
+  
+  # Calculate the 95% confidence intervals
+  CI_lower <- coefficients[, "Estimate"] - 1.96 * coefficients[, "Std. Error"]
+  CI_upper <- coefficients[, "Estimate"] + 1.96 * coefficients[, "Std. Error"]
+  
+  # Combine the results into a data frame
+  results <- data.frame(
+    Coefficient = coefficients[, "Estimate"],
+    CI_Lower = CI_lower,
+    CI_Upper = CI_upper,
+    P_Value = coefficients[, "Pr(>|t|)"]
+  )
+  
+  return(results)
+}
+
+#function to calculate rsq for trees
+calculate_rsq <- function(model, data, target_column) {
+  # Predict using the model
+  predicted_values <- predict(model, data)
+  
+  # Calculate TSS and RSS
+  TSS <- sum((data[[target_column]] - mean(data[[target_column]]))^2)
+  RSS <- sum((data[[target_column]] - predicted_values)^2)
+  
+  # Calculate R^2
+  R2 <- (RSS/TSS)
+  
+  return(R2)
+}
+#function to calculate adj rsq for trees
+calculate_adj_rsq<-function(data,k,model,target_column){
+  R2<-calculate_rsq(model,data,target_column)
+  adj.rsq<-1-((1-R2)*(nrow(data)/(nrow(data)-k-1)))
+  return(adj.rsq)
+}
+```
+
+
+```{r}
+# Perform linear regression
+model <- lm(`AT 3: Critical appraisal essay Wk9` ~ .-1,data = lin_regression_data)
+
+# Print the model summary
+summary(model)
+
+get_regression_summary(model)
+# Generate diagnostic plots
+par(mfrow=c(2,2))  # Arrange plots in a 2x2 grid
+plot(model)
+calculate_RMSE(model, lin_regression_data, 'AT 3: Critical appraisal essay Wk9')
+```
+
+
+```{r}
+# Perform stepwise regression
+stepwise_model <- step(model, direction = "both")
+
+# Summary of the selected model
+summary(stepwise_model)
+
+# Generate diagnostic plots
+par(mfrow=c(2,2))  # Arrange plots in a 2x2 grid
+plot(stepwise_model)
+calculate_RMSE(stepwise_model, lin_regression_data, 'AT 3: Critical appraisal essay Wk9')
+```
+
+
+```{r}
+# Fit the model with interaction terms
+linear_interaction_model <- lm(`AT 3: Critical appraisal essay Wk9` ~ (Mode * Motivation_Type + ATAR*Motivation_Type+ATAR*`AT2 article summary Wk 5?`)-1, data = lin_regression_data)
+
+
+
+# # Summary of the model
+summary(linear_interaction_model)
+
+get_regression_summary(linear_interaction_model)
+# # Generate diagnostic plots
+par(mfrow=c(2,2))  # Arrange plots in a 2x2 grid
+plot(linear_interaction_model)
+
+calculate_RMSE(linear_interaction_model, lin_regression_data, 'AT 3: Critical appraisal essay Wk9')
+
+```
+
+
+```{r}
+# List of IMI subscales vs AT3 for moderator analysis
+regression_data_mod <- dplyr::select(regression_data,-Age)
+
+imi_subscales <- c("IMI - Interest/Enjoyment","IMI - Perceived Competence","IMI - Effort/Importance","IMI - Pressure/Tension","IMI - Perceived Choice","IMI - Value/Usefulness","IMI - Relatedness")
+
+# Loop through each IMI subscale and run the moderator analysis
+for(subscale in imi_subscales) {
+  formula_str <- paste("`AT 3: Critical appraisal essay Wk9` ~ ATAR * `", subscale, "`","-1", sep = "")
+  fit <- lm(formula_str, data = regression_data_mod)  # Note the data argument here
+  # Call the calculate_RMSE function for each fit
+  print(paste("Moderator Analysis for", subscale))
+  print(summary(fit))
+  print(get_regression_summary(fit))
+  calculate_RMSE(fit, regression_data_mod, "AT 3: Critical appraisal essay Wk9")
+}
+
+```
+
+
+```{r}
+# Build the regression tree
+tree_model <- rpart(`AT 3: Critical appraisal essay Wk9` ~ .,
+                    data = lin_regression_data,
+                    method = "anova")
+# Plot the decision tree with minimum sample sizes
+rpart.plot(tree_model, type = 1, extra = 101)
+# Calculate and print R^2 using the custom function
+R2_value <- calculate_rsq(tree_model, lin_regression_data, 'AT 3: Critical appraisal essay Wk9')
+cat("R-squared:", R2_value, "\n")
+Adj.RSQ<-calculate_adj_rsq(lin_regression_data,ncol(lin_regression_data) - 1,tree_model,'AT 3: Critical appraisal essay Wk9')
+cat("Adj.R-squared:", Adj.RSQ, "\n")
+calculate_RMSE(tree_model,lin_regression_data,'AT 3: Critical appraisal essay Wk9')
+printcp(tree_model)
+# Calculate and print adjusted R-squared
+low_cp<-tree_model$cptable[which.min(tree_model$cptable[,"xerror"]),"CP"]
+#This Model of Dtree is better than pruned tree bcoz it has lower RMSE and compared to lin regression also this is better Model.
+```
+
+
+```{r}
+pruned_tree <- prune(tree_model, cp=0.078368)
+rpart.plot(pruned_tree, type = 1, extra = 101)
+R2_value <- calculate_rsq(pruned_tree, lin_regression_data, 'AT 3: Critical appraisal essay Wk9')
+cat("R-squared:", R2_value, "\n")
+Adj.RSQ<-calculate_adj_rsq(lin_regression_data,ncol(lin_regression_data) - 1,pruned_tree,'AT 3: Critical appraisal essay Wk9')
+cat("Adj.R-squared:", Adj.RSQ, "\n")
+calculate_RMSE(pruned_tree,lin_regression_data,'AT 3: Critical appraisal essay Wk9')
+```
+
+```{r}
+#Select impotrant variables for linear regression using decision tree
+variable_importance <- tree_model$variable.importance
+print(variable_importance)
+
+
+
+# Train linear regression model with important variables fron Decison tree Regression
+best_lin_model <- lm(`AT 3: Critical appraisal essay Wk9` ~ (ATAR +IM_Percentage+`AT2 article summary Wk 5?`+`IMI - Pressure/Tension`+Campus_transformed)-1,data = lin_regression_data)
+
+
+# Print the model summary
+summary(best_lin_model)
+calculate_RMSE(best_lin_model, lin_regression_data, 'AT 3: Critical appraisal essay Wk9')
+get_regression_summary(best_lin_model)
+# Generate diagnostic plots
+par(mfrow=c(2,2))  # Arrange plots in a 2x2 grid
+plot(best_lin_model)
+```
+
+#SVM regression
+```{r}
+model_svm_linear <- svm(`AT 3: Critical appraisal essay Wk9` ~ .,data = lin_regression_data, type = "eps-regression", kernel = "linear")
+predictions <- predict(model_svm_linear, newdata =lin_regression_data)
+summary(model_svm_linear)
+
+
+# Assuming you have already fitted the SVM model and made predictions
+# Calculate residuals
+residuals <- predictions - lin_regression_data$`AT 3: Critical appraisal essay Wk9`
+
+# Calculate MSE
+mse <- mean(residuals^2)
+
+# Calculate RMSE
+rmse <- sqrt(mse)
+print(rmse)
+```
+
+
+```{r}
+# automated tuning of gamma paramter for RBF kernel
+tuned_model <- tune.svm(`AT 3: Critical appraisal essay Wk9` ~ .,data = lin_regression_data, type = "eps-regression", kernel = "radial", gamma = 10^(-3:2))
+best_model <- tuned_model$best.model
+predictions <- predict(best_model, newdata =lin_regression_data)
+```
+```{r}
+# Calculate residuals of svm
+residuals <- predictions - lin_regression_data$`AT 3: Critical appraisal essay Wk9`
+
+# Calculate MSE
+mse <- mean(residuals^2)
+
+# Calculate RMSE
+rmse <- sqrt(mse)
+print(rmse)
+```
+
+#Logistic Regression
+```{r}
+log_regression_data<-dplyr::select(regression_data,-c(Campus,`Region origin`,`AT 3: Critical appraisal essay Wk9`,AT3_Performance,TOTAL,TOTAL_Performance,SUS,`IMI - Interest/Enjoyment`,`IMI - Perceived Competence`,`IMI - Effort/Importance`,`IMI - Perceived Choice`,`IMI - Value/Usefulness`,`IMI - Relatedness`,`IMI Total`,EM_Percentage,Like_Hybrid,id,`Course Weighted Average`,Age))
+
+
+model_log <- glm(AT3_Median_Performance ~.-1,data = log_regression_data,family = binomial)
+
+# Print the model summary
+summary(model_log)
+```
+
+
+```{r}
+# Load necessary libraries
+
+
+# Assuming you have a logistic regression model named 'model_log'
+# Assuming 'regression_data' is your dataframe with the test data
+
+# Make predictions using the logistic regression model
+predictions <- predict(model_log, newdata = log_regression_data, type = "response")
+
+# Convert probabilities to class predictions
+predicted_classes <- ifelse(predictions > 0.5, 1,0)
+
+# Create a data frame with actual and predicted class labels
+confusion_data <- data.frame(Actual = regression_data$AT3_Median_Performance,
+                             Predicted = predicted_classes)
+
+print(paste("Accuracy of Basic Logistic Model is",(sum(confusion_data$Actual==confusion_data$Predicted)/nrow(confusion_data))*100))
+```
+
+
+
+```{r}
+
+# Perform stepwise logistic regression
+stepwise_log_model <- step(model_log, ,family = binomial)
+
+# Summary of the selected model
+summary(stepwise_log_model)
+```
+
+```{r}
+# Make predictions using the logistic regression model
+predictions <- predict(stepwise_log_model, newdata = log_regression_data, type = "response")
+
+# Convert probabilities to class predictions
+predicted_classes <- ifelse(predictions > 0.5, 1,0)
+
+# Create a data frame with actual and predicted class labels
+confusion_data <- data.frame(Actual = regression_data$AT3_Median_Performance,
+                             Predicted = predicted_classes)
+
+print(paste("Accuracy of Stepwise Logistic Model is",(sum(confusion_data$Actual==confusion_data$Predicted)/nrow(confusion_data))*100))
+```
+
+
+
+```{r}
+# Assess variable importance using varImp
+variable_importance_log <- varImp(model_log)
+print(variable_importance_log)
+
+```
+
+
+```{r}
+# Train logistic regression model with important variables
+model_log <- glm(`AT3_Median_Performance` ~ (`ATAR`+Age_Group+Gender+`IMI - Pressure/Tension`+`AT2 article summary Wk 5?`+IM_Percentage+Motivation_Type+Campus_transformed)-1,data = log_regression_data,family = binomial)
+
+# Print the model summary
+summary(model_log)
+
+```
+
+```{r}
+# Make predictions using the logistic regression model
+predictions <- predict(model_log, newdata = log_regression_data, type = "response")
+
+# Convert probabilities to class predictions
+predicted_classes <- ifelse(predictions > 0.5, 1,0)
+
+# Create a data frame with actual and predicted class labels
+confusion_data <- data.frame(Actual = log_regression_data$AT3_Median_Performance,
+                             Predicted = predicted_classes)
+
+print(paste("Accuracy of Logistic Model with Important Variables is",(sum(confusion_data$Actual==confusion_data$Predicted)/nrow(confusion_data))*100))
+
+```
+
+
+```{r}
+# Logistic Regression with Selected Two-Way Interaction Terms
+interaction_model <- glm(AT3_Median_Performance ~ (ATAR + `AT2 article summary Wk 5?` + IM_Percentage + ATAR:`AT2 article summary Wk 5?` + ATAR:IM_Percentage + `AT2 article summary Wk 5?`:IM_Percentage)-1, data = log_regression_data, family = binomial)
+
+# Summary of the model
+summary(interaction_model)
+
+```
+
+
+```{r}
+# Make predictions using the logistic regression model
+predictions <- predict(interaction_model, newdata = log_regression_data, type = "response")
+
+# Convert probabilities to class predictions
+predicted_classes <- ifelse(predictions > 0.5, 1,0)
+
+# Create a data frame with actual and predicted class labels
+confusion_data <- data.frame(Actual = log_regression_data$AT3_Median_Performance,
+                             Predicted = predicted_classes)
+
+print(paste("Accuracy of Logistic Regression using interactions",(sum(confusion_data$Actual==confusion_data$Predicted)/nrow(confusion_data))*100))
+```
+
+```{r}
+# Logistic Regression with Only Significant Interaction Term
+significant_logistic_interactions <- glm(AT3_Median_Performance ~ (ATAR + `AT2 article summary Wk 5?` + ATAR:`AT2 article summary Wk 5?`)-1, 
+                                         data = log_regression_data, 
+                                         family = binomial)
+
+# Summary of the model
+summary(significant_logistic_interactions)
+
+```
+
+
+```{r}
+# Make predictions using the logistic regression model
+predictions <- predict(significant_logistic_interactions, newdata = log_regression_data, type = "response")
+
+# Convert probabilities to class predictions
+predicted_classes <- ifelse(predictions > 0.5, 1,0)
+
+# Create a data frame with actual and predicted class labels
+confusion_data <- data.frame(Actual = log_regression_data$AT3_Median_Performance,
+                             Predicted = predicted_classes)
+
+print(paste("Accuracy of Logistic Regression using significant interactions",(sum(confusion_data$Actual==confusion_data$Predicted)/nrow(confusion_data))*100))
+```
+
+
+#SVM classification
+```{r}
+model_svm_class <- svm(AT3_Median_Performance ~.,data = log_regression_data,type = "C-classification",kernel = "linear")
+predictions <- predict(model_svm_class, newdata =log_regression_data)
+# Evaluate the model
+# Calculate accuracy
+accuracy <- sum(predictions == log_regression_data$AT3_Median_Performance) / length(predictions)
+print(accuracy*100)
+```
+
+```{r}
+# automated tuning of gamma paramter for RBF kernel
+log_regression_data$AT3_Median_Performance <- as.factor(log_regression_data$AT3_Median_Performance)
+tuned_model <- tune.svm(AT3_Median_Performance ~.,data = log_regression_data,type = "C-classification", kernel = "radial", gamma = 10^(-3:2))
+best_model <- tuned_model$best.model
+predictions <- predict(best_model, newdata =log_regression_data)
+# Evaluate the model
+# Calculate accuracy
+accuracy <- sum(predictions == log_regression_data$AT3_Median_Performance) / length(predictions)
+print(accuracy*100)
+```
+
+```{r}
+write_xlsx(lin_regression_data, path = "C:\\Users\\Angat\\Downloads\\hybrid_teaching_cleaned_transformed.xlsx")
+```
